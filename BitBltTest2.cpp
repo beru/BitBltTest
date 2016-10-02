@@ -8,52 +8,46 @@
 #include <vector>
 #include <assert.h>
 #include "Image.h"
+#include "trace.h"
 
 namespace {
 
-HWND hWnd;
-HBITMAP hBMP;
-std::vector<uint8_t> bmiBuff(sizeof(BITMAPINFO) + sizeof(RGBQUAD) * 256);
-BITMAPINFO* pBMI;
-void* pBits;
-HDC hMemDC;
-HFONT hFont;
-
-enum {
-	TimerID_Draw,
+enum TimerId {
+	TimerId_Draw,
 };
 
-const int FPS = 60;
-int frameCount = 0;
+enum ImgId {
+	ImgId_Dest,
+	ImgId_Star,
+	ImgId_Button,
 
-enum ImgID {
-	Dest,
-	Star,
-	Button,
-
-	MaxID,
+	ImgId_MaxId,
 };
-std::vector<Image*> images;
 
 struct Button
 {
-	int width;
-	int height;
+	Rect rect;
 
 	struct ImageRef {
-		Image* img;
+		const Image* img;
 		Point pos;
+
+		void Set(const Image* img, int x, int y) {
+			this->img = img;
+			pos.x = x;
+			pos.y = y;
+		}
 	};
 
 	enum State {
-		Normal,
-		MouseOver,
-		MouseDown,
+		State_Normal,
+		State_MouseOver,
+		State_MouseDown,
 
-		StateMax
+		State_Max
 	} state;
 
-	ImageRef images[StateMax];
+	ImageRef images[State_Max];
 };
 
 struct RenderBlock
@@ -71,9 +65,10 @@ enum RenderBlockId {
 	RBID__Max,
 };
 
+int frameCount = 0;
 RenderBlock renderBlocks[RBID__Max][2];
 
-void UpdateRenderBlock(RenderBlockId id, const Rect& rect, int state = 0) {
+void UpdateRenderBlock(int id, const Rect& rect, int state = 0) {
 	RenderBlock& rb = renderBlocks[id][frameCount & 1];
 	rb.rect = rect;
 	rb.state = state;
@@ -82,6 +77,7 @@ void UpdateRenderBlock(RenderBlockId id, const Rect& rect, int state = 0) {
 Rect GetBitBltRect() {
 	Rect rect;
 	rect.Clear();
+	// Combine dirty rectangles
 	for (size_t i = 0; i < RBID__Max; ++i) {
 		auto& a = renderBlocks[i][0];
 		auto& b = renderBlocks[i][1];
@@ -97,6 +93,19 @@ Rect GetBitBltRect() {
 	}
 	return rect;
 }
+
+
+HWND hWnd;
+HBITMAP hBMP;
+std::vector<uint8_t> bmiBuff(sizeof(BITMAPINFO) + sizeof(RGBQUAD) * 256);
+BITMAPINFO* pBMI;
+void* pBits;
+HDC hMemDC;
+HFONT hFont;
+const int FPS = 60;
+std::vector<Image*> images;
+Button btn0;
+Button btn1;
 
 } // anonymous namespace
 
@@ -145,17 +154,17 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	::SelectObject(hMemDC, hFont);
 
 	struct ImgDef {
-		ImgID id;
+		ImgId id;
 		const char* path;
 	};
 	
 	ImgDef defs[] = {
-		ImgID::Star,	"star.png",
-		ImgID::Button,	"btn.png",
+		ImgId_Star,	"star.png",
+		ImgId_Button,	"btn.png",
 
 	};
 
-	images.resize(MaxID);
+	images.resize(ImgId_MaxId);
 	for (auto def : defs) {
 		auto img = new Image();
 		if (!img->LoadFromFile(def.path)) {
@@ -166,7 +175,7 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	}
 
 	auto pDst = new Image();
-	images[Dest] = pDst;
+	images[ImgId_Dest] = pDst;
 	auto& dst = *pDst;
 	dst.width = pBMI->bmiHeader.biWidth;
 	dst.height = abs(pBMI->bmiHeader.biHeight);
@@ -174,14 +183,24 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	dst.pixelType = Image::PixelType_BGRA32;
 	dst.pixels = pBits;
 
+	auto btnImg = images[ImgId_Button];
+
+	btn0.rect.Set(500, 100, 300, 100);
+	btn0.images[Button::State_Normal].Set(btnImg, 0, 0);
+	btn0.images[Button::State_MouseOver].Set(btnImg, 0, 100);
+	btn0.images[Button::State_MouseDown].Set(btnImg, 0, 200);
+
+	btn1 = btn0;
+	btn1.rect.x = 1100;
+
 	memset(&renderBlocks, 0xFF, sizeof(renderBlocks));
 
-	::SetTimer(hWnd, TimerID_Draw, 1000 / FPS, 0);
+	::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
 }
 
 void OnDestroy(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
-	::KillTimer(hWnd, TimerID_Draw);
+	::KillTimer(hWnd, TimerId_Draw);
 	::DeleteDC(hMemDC);
 	::DeleteObject(hBMP);
 	::DeleteObject(hFont);
@@ -211,6 +230,9 @@ void OnPaint(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	);
 	
 	EndPaint(hWnd, &ps);
+
+	TRACE(_T("%d %d %d %d\n"), rec.left, rec.top, rec.right - rec.left, rec.bottom - rec.top);
+
 }
 
 void OnMouseDown(HWND hWnd, WPARAM wParam, LPARAM lParam)
@@ -236,19 +258,27 @@ inline DWORD getTime()
 	return ret;
 }
 
-inline void draw(int dx, int dy, ImgID id, int sx, int sy, int sw, int sh, Rect& updated)
+inline bool IsKeyDown(int vk)
 {
-	Image& dst = *images[Dest];
-	const Image& src = *images[id];
-	::Draw(dst, dx, dy, src, sx, sy, sw, sh, updated);
+	return GetAsyncKeyState(vk) < 0;
 }
 
+inline bool IsMouseDown() {
+	return IsKeyDown(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON);
+}
 
 void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
 	if (!IsWindow(hWnd)) {
 		return;
 	}
+
+	POINT cursorPos;
+	::GetCursorPos(&cursorPos);
+	::ScreenToClient(hWnd, &cursorPos);
+
+	bool windowHasFocus = (GetFocus() == hWnd);
+	bool isMouseDown = IsMouseDown();
 
 	DWORD now = getTime();
 
@@ -260,15 +290,33 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 	Rect updated;
 
-	Image& dst = *images[Dest];
+	Image& dst = *images[ImgId_Dest];
 	FillRect(dst, 0, 0, dst.width, dst.height, RGB(150, 50, 50), updated);
 	UpdateRenderBlock(RBID_Background, updated);
 
 	int offset = +(now % 10000) / 10;
 	int xc = 200 +offset / 2;
 	int yc = 200 + offset;
-	draw(xc, yc, ImgID::Star, 0, 0, 200, 200, updated);
+	Image& star = *images[ImgId_Star];
+	Draw(dst, xc, yc, star, 0, 0, 200, 200, updated);
 	UpdateRenderBlock(RBID_Star, updated);
+
+	Button* btns[] = {
+		&btn0,
+		&btn1
+	};
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (windowHasFocus && btn->rect.IsHit(cursorPos.x, cursorPos.y)) {
+			btn->state = isMouseDown ? Button::State_MouseDown : Button::State_MouseOver;
+		}
+		else {
+			btn->state = Button::State_Normal;
+		}
+		Button::ImageRef& imgRef = btn->images[btn->state];
+		Draw(dst, btn->rect.x, btn->rect.y, *imgRef.img, imgRef.pos.x, imgRef.pos.y, btn->rect.x, btn->rect.y, updated);
+		UpdateRenderBlock(RBID_Button0 + i, updated, btn->state);
+	}
 
 	++frameCount;
 

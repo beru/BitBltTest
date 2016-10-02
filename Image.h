@@ -67,6 +67,10 @@ struct Rect
 		r.bottom = Bottom();
 		return r;
 	}
+
+	bool IsHit(int x, int y) const {
+		return x >= Left() && x < Right() && y >= Top() && y < Bottom();
+	}
 };
 
 static inline
