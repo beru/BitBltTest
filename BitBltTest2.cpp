@@ -3,7 +3,10 @@
 
 #include <Windows.h>
 #include <mmsystem.h>
+#include <Windowsx.h>
+
 #pragma comment( lib, "winmm.lib")
+#pragma comment( lib, "Imm32.lib")
 
 #include <vector>
 #include <assert.h>
@@ -107,6 +110,11 @@ std::vector<Image*> images;
 Button btn0;
 Button btn1;
 
+Button* btns[] = {
+	&btn0,
+	&btn1
+};
+
 } // anonymous namespace
 
 void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
@@ -195,6 +203,8 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 	memset(&renderBlocks, 0xFF, sizeof(renderBlocks));
 
+	ImmDisableIME(-1);
+
 	::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
 }
 
@@ -237,17 +247,56 @@ void OnPaint(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 void OnMouseDown(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
-	
+	if (wParam & MK_LBUTTON) {
+		int x = GET_X_LPARAM(lParam);
+		int y = GET_Y_LPARAM(lParam);
+		for (size_t i = 0; i<_countof(btns); ++i) {
+			auto btn = btns[i];
+			if (btn->rect.IsHit(x, y)) {
+				btn->state = Button::State_MouseDown;
+				::SetCapture(hWnd);
+				return;
+			}
+		}
+	}
 }
 
 void OnMouseUp(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
-	
+	int x = GET_X_LPARAM(lParam);
+	int y = GET_Y_LPARAM(lParam);
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (btn->state == Button::State_MouseDown) {
+			if (btn->rect.IsHit(x, y)) {
+				btn->state = Button::State_MouseOver;
+			}else {
+				btn->state = Button::State_Normal;
+			}
+			break;
+		}
+	}
+	::ReleaseCapture();
 }
 
 void OnMouseMove(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
-	
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (btn->state == Button::State_MouseDown) {
+			return;
+		}
+	}
+	int x = GET_X_LPARAM(lParam);
+	int y = GET_Y_LPARAM(lParam);
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (btn->rect.IsHit(x, y)) {
+			btn->state = Button::State_MouseOver;
+		}else {
+			btn->state = Button::State_Normal;
+		}
+	}
 }
 
 inline DWORD getTime()
@@ -301,18 +350,8 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	Draw(dst, xc, yc, star, 0, 0, 200, 200, updated);
 	UpdateRenderBlock(RBID_Star, updated);
 
-	Button* btns[] = {
-		&btn0,
-		&btn1
-	};
 	for (size_t i = 0; i<_countof(btns); ++i) {
 		auto btn = btns[i];
-		if (windowHasFocus && btn->rect.IsHit(cursorPos.x, cursorPos.y)) {
-			btn->state = isMouseDown ? Button::State_MouseDown : Button::State_MouseOver;
-		}
-		else {
-			btn->state = Button::State_Normal;
-		}
 		Button::ImageRef& imgRef = btn->images[btn->state];
 		Draw(dst, btn->rect.x, btn->rect.y, *imgRef.img, imgRef.pos.x, imgRef.pos.y, btn->rect.x, btn->rect.y, updated);
 		UpdateRenderBlock(RBID_Button0 + i, updated, btn->state);
