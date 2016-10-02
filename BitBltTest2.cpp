@@ -33,8 +33,70 @@ enum ImgID {
 
 	MaxID,
 };
-
 std::vector<Image*> images;
+
+struct Button
+{
+	int width;
+	int height;
+
+	struct ImageRef {
+		Image* img;
+		Point pos;
+	};
+
+	enum State {
+		Normal,
+		MouseOver,
+		MouseDown,
+
+		StateMax
+	} state;
+
+	ImageRef images[StateMax];
+};
+
+struct RenderBlock
+{
+	Rect rect;
+	int state;
+};
+
+enum RenderBlockId {
+	RBID_Background,
+	RBID_Star,
+	RBID_Button0,
+	RBID_Button1,
+
+	RBID__Max,
+};
+
+RenderBlock renderBlocks[RBID__Max][2];
+
+void UpdateRenderBlock(RenderBlockId id, const Rect& rect, int state = 0) {
+	RenderBlock& rb = renderBlocks[id][frameCount & 1];
+	rb.rect = rect;
+	rb.state = state;
+}
+
+Rect GetBitBltRect() {
+	Rect rect;
+	rect.Clear();
+	for (size_t i = 0; i < RBID__Max; ++i) {
+		auto& a = renderBlocks[i][0];
+		auto& b = renderBlocks[i][1];
+		if (a.rect == b.rect) {
+			if (a.state != b.state) {
+				rect.Union(a.rect);
+			}
+		}
+		else {
+			rect.Union(a.rect);
+			rect.Union(b.rect);
+		}
+	}
+	return rect;
+}
 
 } // anonymous namespace
 
@@ -112,6 +174,8 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	dst.pixelType = Image::PixelType_BGRA32;
 	dst.pixels = pBits;
 
+	memset(&renderBlocks, 0xFF, sizeof(renderBlocks));
+
 	::SetTimer(hWnd, TimerID_Draw, 1000 / FPS, 0);
 }
 
@@ -172,11 +236,11 @@ inline DWORD getTime()
 	return ret;
 }
 
-inline void draw(int dx, int dy, ImgID id, int sx, int sy, int sw = -1, int sh = -1)
+inline void draw(int dx, int dy, ImgID id, int sx, int sy, int sw, int sh, Rect& updated)
 {
 	Image& dst = *images[Dest];
 	const Image& src = *images[id];
-	::Draw(dst, dx, dy, src, sx, sy, sw, sh);
+	::Draw(dst, dx, dy, src, sx, sy, sw, sh, updated);
 }
 
 
@@ -193,17 +257,27 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 		return;
 	}
 #endif
-	
-	for (int y =-20; y < 20; ++y) {
-		for (int x = -20; x < 20; ++x) {
-			int offset = +(now % 10000) / 10;
-			int xc = x * 200;// +offset / 2;
-			int yc = y * 200 + offset;
-			draw(xc, yc, ImgID::Star, 0, 0, 200, 200);
-		}
-	}
+
+	Rect updated;
+
+	Image& dst = *images[Dest];
+	FillRect(dst, 0, 0, dst.width, dst.height, RGB(150, 50, 50), updated);
+	UpdateRenderBlock(RBID_Background, updated);
+
+	int offset = +(now % 10000) / 10;
+	int xc = 200 +offset / 2;
+	int yc = 200 + offset;
+	draw(xc, yc, ImgID::Star, 0, 0, 200, 200, updated);
+	UpdateRenderBlock(RBID_Star, updated);
 
 	++frameCount;
+
+	updated = GetBitBltRect();
+	RECT r = updated.GetRECT();
+#if 0
 	InvalidateRect(hWnd, NULL, FALSE);
+#else
+	InvalidateRect(hWnd, &r, FALSE);
+#endif
 }
 

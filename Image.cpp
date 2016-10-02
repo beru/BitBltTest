@@ -68,9 +68,12 @@ bool Image::Unload()
 
 void Draw(
 	Image& dst, int dx, int dy,
-	const Image& src, int sx, int sy, int sw /* = -1 */, int sh /* = -1 */
+	const Image& src, int sx, int sy, int sw, int sh,
+	Rect& updatedRect
 	)
 {
+	updatedRect.Clear();
+
 	// out of bounds
 	if (0
 		|| dx > dst.width
@@ -145,5 +148,48 @@ void Draw(
 		pdst = (uint32_t*)((uint8_t*)pdst + dst.lineStride);
 		psrc = (const uint32_t*)((const uint8_t*)psrc + src.lineStride);
 	}
+
+	updatedRect.Set(dx, dy, sw, sh);
+}
+
+
+void FillRect(
+	Image& dst, int x, int y, int w, int h, uint32_t color,
+	Rect& updatedRect
+	)
+{
+	updatedRect.Clear();
+
+	// coordinates normalization
+	if (x < 0) {
+		w += x;
+		x = 0;
+	}
+	if (y < 0) {
+		h += y;
+		y = 0;
+	}
+	// coordinates clipping
+	if (x + w > dst.width) {
+		w = dst.width - x;
+	}
+	if (y + h > dst.height) {
+		h = dst.height - y;
+	}
+
+	if (w <= 0 || h <= 0) {
+		return;
+	}
+	
+	uint32_t* pdst = (uint32_t*) dst.pixels;
+	pdst = (uint32_t*)((uint8_t*)pdst + y * dst.lineStride) + x;
+	for (int y=0; y<h; ++y) {
+		for (int x=0; x<w; ++x) {
+			pdst[x] = color;
+		}
+		pdst = (uint32_t*)((uint8_t*)pdst + dst.lineStride);
+	}
+
+	updatedRect.Set(x, y, w, h);
 }
 
