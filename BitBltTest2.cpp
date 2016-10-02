@@ -1,4 +1,4 @@
-
+﻿
 #include "stdafx.h"
 
 #include <Windows.h>
@@ -97,8 +97,7 @@ Rect GetBitBltRect() {
 	return rect;
 }
 
-
-HWND hWnd;
+// Of course we shouldn't use many global variables in production code...(°ロ°)☝
 HBITMAP hBMP;
 std::vector<uint8_t> bmiBuff(sizeof(BITMAPINFO) + sizeof(RGBQUAD) * 256);
 BITMAPINFO* pBMI;
@@ -206,6 +205,7 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	ImmDisableIME(-1);
 
 	::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
+	::SendMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
 }
 
 void OnDestroy(HWND hWnd, WPARAM wParam, LPARAM lParam)
@@ -307,27 +307,11 @@ inline DWORD getTime()
 	return ret;
 }
 
-inline bool IsKeyDown(int vk)
+static inline void draw(HWND hWnd)
 {
-	return GetAsyncKeyState(vk) < 0;
-}
-
-inline bool IsMouseDown() {
-	return IsKeyDown(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON);
-}
-
-void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
-{
-	if (!IsWindow(hWnd)) {
-		return;
-	}
-
 	POINT cursorPos;
 	::GetCursorPos(&cursorPos);
 	::ScreenToClient(hWnd, &cursorPos);
-
-	bool windowHasFocus = (GetFocus() == hWnd);
-	bool isMouseDown = IsMouseDown();
 
 	DWORD now = getTime();
 
@@ -350,7 +334,7 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	Draw(dst, xc, yc, star, 0, 0, 200, 200, updated);
 	UpdateRenderBlock(RBID_Star, updated);
 
-	for (size_t i = 0; i<_countof(btns); ++i) {
+	for (int i = 0; i<_countof(btns); ++i) {
 		auto btn = btns[i];
 		Button::ImageRef& imgRef = btn->images[btn->state];
 		Draw(dst, btn->rect.x, btn->rect.y, *imgRef.img, imgRef.pos.x, imgRef.pos.y, btn->rect.x, btn->rect.y, updated);
@@ -366,5 +350,19 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 #else
 	InvalidateRect(hWnd, &r, FALSE);
 #endif
+
+}
+
+void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
+{
+	if (!IsWindow(hWnd)) {
+		return;
+	}
+
+	if (wParam != TimerId_Draw) {
+		return;
+	}
+
+	draw(hWnd);
 }
 
