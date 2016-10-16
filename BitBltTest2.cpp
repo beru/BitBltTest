@@ -24,7 +24,7 @@
 namespace {
 
 enum TimerId {
-	TimerId_Draw,
+	TimerId_UpdateFrame,
 };
 
 enum ImgId {
@@ -129,7 +129,7 @@ MMRESULT timerId;
 void timeSetEvent_Callback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
     HWND hWnd = (HWND)dwUser;
-    ::PostMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+    ::PostMessage(hWnd, WM_TIMER, TimerId_UpdateFrame, 0);
 }
 
 #elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
@@ -139,7 +139,7 @@ HANDLE hTimerQueue;
 void CreateTimerQueueTimer_Callback(void* pParameter, BOOLEAN TimerOrWaitFired)
 {
     HWND hWnd = (HWND)pParameter;
-    ::PostMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+    ::PostMessage(hWnd, WM_TIMER, TimerId_UpdateFrame, 0);
 }
 
 #endif
@@ -236,11 +236,11 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     // http://omeg.pl/blog/2011/11/on-winapi-timers-and-their-resolution/
 #if TIMER_METHOD == TIMER_METHOD_SetTimer
-    ::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
-	::SendMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+    ::SetTimer(hWnd, TimerId_UpdateFrame, 1000 / FPS, 0);
+	::SendMessage(hWnd, WM_TIMER, TimerId_UpdateFrame, 0);
 #elif TIMER_METHOD == TIMER_METHOD_timeSetEvent
     timerId = ::timeSetEvent(1000/FPS, 0, timeSetEvent_Callback, (DWORD_PTR)hWnd, TIME_PERIODIC|TIME_KILL_SYNCHRONOUS);
-	::SendMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+	::SendMessage(hWnd, WM_TIMER, TimerId_UpdateFrame, 0);
 #elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
     if (::CreateTimerQueueTimer(&hTimerQueue, NULL, CreateTimerQueueTimer_Callback, hWnd, 0, 1000/FPS, WT_EXECUTEDEFAULT) == 0) {
         TRACE("CreateTimerQueueTimer failed %d\n", ::GetLastError());
@@ -252,7 +252,7 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 void OnDestroy(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
 #if TIMER_METHOD == TIMER_METHOD_SetTimer
-	::KillTimer(hWnd, TimerId_Draw);
+	::KillTimer(hWnd, TimerId_UpdateFrame);
 #elif TIMER_METHOD == TIMER_METHOD_timeSetEvent
     ::timeKillEvent(timerId);
 #elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
@@ -328,22 +328,9 @@ void OnMouseUp(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 void OnMouseMove(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
-	for (size_t i = 0; i<_countof(btns); ++i) {
-		auto btn = btns[i];
-		if (btn->state == Button::State_MouseDown) {
-			return;
-		}
-	}
 	int x = GET_X_LPARAM(lParam);
 	int y = GET_Y_LPARAM(lParam);
-	for (size_t i = 0; i<_countof(btns); ++i) {
-		auto btn = btns[i];
-		if (btn->rect.IsHit(x, y)) {
-			btn->state = Button::State_MouseOver;
-		}else {
-			btn->state = Button::State_Normal;
-		}
-	}
+
 }
 
 inline DWORD getTime()
@@ -354,7 +341,27 @@ inline DWORD getTime()
 	return ret;
 }
 
-static inline void draw(HWND hWnd)
+static inline
+void updateFrame(HWND hWnd, POINT cursorPt, bool isMouseOver)
+{
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (btn->state == Button::State_MouseDown) {
+			return;
+		}
+	}
+	for (size_t i = 0; i<_countof(btns); ++i) {
+		auto btn = btns[i];
+		if (isMouseOver && btn->rect.IsHit(cursorPt.x, cursorPt.y)) {
+			btn->state = Button::State_MouseOver;
+		}else {
+			btn->state = Button::State_Normal;
+		}
+	}
+}
+
+static inline
+void draw(HWND hWnd)
 {
 	POINT cursorPos;
 	::GetCursorPos(&cursorPos);
@@ -408,9 +415,18 @@ void OnTimer(HWND hWnd, WPARAM wParam, LPARAM lParam)
 		return;
 	}
 
-	if (wParam != TimerId_Draw) {
+	if (wParam != TimerId_UpdateFrame) {
 		return;
 	}
+
+    POINT pt;
+    ::GetCursorPos(&pt);
+
+    bool isMouseOver = (WindowFromPoint(pt) == hWnd);
+
+    ::ScreenToClient(hWnd, &pt);
+
+    updateFrame(hWnd, pt, isMouseOver);
 
 	draw(hWnd);
 }
