@@ -6,14 +6,24 @@
 
 #if defined(_DEBUG) || defined(DEBUG)
 
-static void TRACE( LPCTSTR pszFormat, ...)
+static void TRACE(const char* pszFormat, ...)
+{
+    va_list	argp;
+    static char pszBuf[10240];	// so sorry-ass
+    va_start(argp, pszFormat);
+    vsprintf_s(pszBuf, _countof(pszBuf) - 1, pszFormat, argp);
+    va_end(argp);
+    OutputDebugStringA(pszBuf);
+}
+
+static void TRACE(const wchar_t* pszFormat, ...)
 {
 	va_list	argp;
-	static TCHAR pszBuf[10240];	// so sorry-ass
+	static wchar_t pszBuf[10240];	// so sorry-ass
 	va_start(argp, pszFormat);
-	_vstprintf( pszBuf, _countof(pszBuf)-1, pszFormat, argp);
+    vswprintf( pszBuf, _countof(pszBuf)-1, pszFormat, argp);
 	va_end(argp);
-	OutputDebugString( pszBuf);
+	OutputDebugStringW( pszBuf);
 }
 
 #else

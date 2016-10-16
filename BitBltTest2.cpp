@@ -13,6 +13,14 @@
 #include "Image.h"
 #include "trace.h"
 
+#define TIMER_METHOD_SetTimer 1
+#define TIMER_METHOD_timeSetEvent 2
+#define TIMER_METHOD_CreateTimerQueueTimer 3
+
+//#define TIMER_METHOD TIMER_METHOD_SetTimer
+//#define TIMER_METHOD TIMER_METHOD_timeSetEvent
+#define TIMER_METHOD TIMER_METHOD_CreateTimerQueueTimer
+
 namespace {
 
 enum TimerId {
@@ -114,6 +122,28 @@ Button* btns[] = {
 	&btn1
 };
 
+#if TIMER_METHOD == TIMER_METHOD_timeSetEvent
+
+MMRESULT timerId;
+
+void timeSetEvent_Callback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
+{
+    HWND hWnd = (HWND)dwUser;
+    ::PostMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+}
+
+#elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
+
+HANDLE hTimerQueue;
+
+void CreateTimerQueueTimer_Callback(void* pParameter, BOOLEAN TimerOrWaitFired)
+{
+    HWND hWnd = (HWND)pParameter;
+    ::PostMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+}
+
+#endif
+
 } // anonymous namespace
 
 void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
@@ -204,13 +234,30 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 	ImmDisableIME(-1);
 
-	::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
+    // http://omeg.pl/blog/2011/11/on-winapi-timers-and-their-resolution/
+#if TIMER_METHOD == TIMER_METHOD_SetTimer
+    ::SetTimer(hWnd, TimerId_Draw, 1000 / FPS, 0);
 	::SendMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+#elif TIMER_METHOD == TIMER_METHOD_timeSetEvent
+    timerId = ::timeSetEvent(1000/FPS, 0, timeSetEvent_Callback, (DWORD_PTR)hWnd, TIME_PERIODIC|TIME_KILL_SYNCHRONOUS);
+	::SendMessage(hWnd, WM_TIMER, TimerId_Draw, 0);
+#elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
+    if (::CreateTimerQueueTimer(&hTimerQueue, NULL, CreateTimerQueueTimer_Callback, hWnd, 0, 1000/FPS, WT_EXECUTEDEFAULT) == 0) {
+        TRACE("CreateTimerQueueTimer failed %d\n", ::GetLastError());
+    }
+#else
+#endif
 }
 
 void OnDestroy(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
+#if TIMER_METHOD == TIMER_METHOD_SetTimer
 	::KillTimer(hWnd, TimerId_Draw);
+#elif TIMER_METHOD == TIMER_METHOD_timeSetEvent
+    ::timeKillEvent(timerId);
+#elif TIMER_METHOD == TIMER_METHOD_CreateTimerQueueTimer
+    ::DeleteTimerQueueTimer(NULL, hTimerQueue, NULL);
+#endif
 	::DeleteDC(hMemDC);
 	::DeleteObject(hBMP);
 	::DeleteObject(hFont);
@@ -241,7 +288,7 @@ void OnPaint(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	
 	EndPaint(hWnd, &ps);
 
-	TRACE(_T("%d %d %d %d\n"), rec.left, rec.top, rec.right - rec.left, rec.bottom - rec.top);
+	//TRACE(_T("%d %d %d %d\n"), rec.left, rec.top, rec.right - rec.left, rec.bottom - rec.top);
 
 }
 
@@ -314,6 +361,8 @@ static inline void draw(HWND hWnd)
 	::ScreenToClient(hWnd, &cursorPos);
 
 	DWORD now = getTime();
+
+    TRACE("%d\n", now);
 
 #if 0
 	if (frameCount) {
