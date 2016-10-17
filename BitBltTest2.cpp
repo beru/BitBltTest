@@ -18,8 +18,8 @@
 #define TIMER_METHOD_CreateTimerQueueTimer 3
 
 //#define TIMER_METHOD TIMER_METHOD_SetTimer
-//#define TIMER_METHOD TIMER_METHOD_timeSetEvent
-#define TIMER_METHOD TIMER_METHOD_CreateTimerQueueTimer
+#define TIMER_METHOD TIMER_METHOD_timeSetEvent
+//#define TIMER_METHOD TIMER_METHOD_CreateTimerQueueTimer
 
 namespace {
 
@@ -55,55 +55,15 @@ struct Button
 		State_MouseOver,
 		State_MouseDown,
 
-		State_Max
+		State_Num
 	} state;
 
-	ImageRef images[State_Max];
-};
+    bool stateChanged;
 
-struct RenderBlock
-{
-	Rect rect;
-	int state;
-};
-
-enum RenderBlockId {
-	RBID_Background,
-	RBID_Star,
-	RBID_Button0,
-	RBID_Button1,
-
-	RBID__Max,
+	ImageRef images[State_Num];
 };
 
 int frameCount = 0;
-RenderBlock renderBlocks[RBID__Max][2];
-
-void UpdateRenderBlock(int id, const Rect& rect, int state = 0) {
-	RenderBlock& rb = renderBlocks[id][frameCount & 1];
-	rb.rect = rect;
-	rb.state = state;
-}
-
-Rect GetBitBltRect() {
-	Rect rect;
-	rect.Clear();
-	// Combine dirty rectangles
-	for (size_t i = 0; i < RBID__Max; ++i) {
-		auto& a = renderBlocks[i][0];
-		auto& b = renderBlocks[i][1];
-		if (a.rect == b.rect) {
-			if (a.state != b.state) {
-				rect.Union(a.rect);
-			}
-		}
-		else {
-			rect.Union(a.rect);
-			rect.Union(b.rect);
-		}
-	}
-	return rect;
-}
 
 // Of course we shouldn't use many global variables in production code...(°ロ°)☝
 HBITMAP hBMP;
@@ -226,11 +186,13 @@ void OnCreate(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	btn0.images[Button::State_Normal].Set(btnImg, 0, 0);
 	btn0.images[Button::State_MouseOver].Set(btnImg, 0, 100);
 	btn0.images[Button::State_MouseDown].Set(btnImg, 0, 200);
+    btn0.state = Button::State_Normal;
+    btn0.stateChanged = true;
 
 	btn1 = btn0;
 	btn1.rect.x = 1100;
-
-	memset(&renderBlocks, 0xFF, sizeof(renderBlocks));
+    btn1.state = Button::State_Normal;
+    btn1.stateChanged = true;
 
 	ImmDisableIME(-1);
 
@@ -300,8 +262,9 @@ void OnMouseDown(HWND hWnd, WPARAM wParam, LPARAM lParam)
 		for (size_t i = 0; i<_countof(btns); ++i) {
 			auto btn = btns[i];
 			if (btn->rect.IsHit(x, y)) {
-				btn->state = Button::State_MouseDown;
 				::SetCapture(hWnd);
+                btn->stateChanged = true;
+				btn->state = Button::State_MouseDown;
 				return;
 			}
 		}
@@ -315,11 +278,9 @@ void OnMouseUp(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	for (size_t i = 0; i<_countof(btns); ++i) {
 		auto btn = btns[i];
 		if (btn->state == Button::State_MouseDown) {
-			if (btn->rect.IsHit(x, y)) {
-				btn->state = Button::State_MouseOver;
-			}else {
-				btn->state = Button::State_Normal;
-			}
+            Button::State nextState = btn->rect.IsHit(x, y) ? Button::State_MouseOver : Button::State_Normal;
+            btn->stateChanged = true;
+			btn->state = nextState;
 			break;
 		}
 	}
@@ -330,7 +291,6 @@ void OnMouseMove(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
 	int x = GET_X_LPARAM(lParam);
 	int y = GET_Y_LPARAM(lParam);
-
 }
 
 inline DWORD getTime()
@@ -352,11 +312,11 @@ void updateFrame(HWND hWnd, POINT cursorPt, bool isMouseOver)
 	}
 	for (size_t i = 0; i<_countof(btns); ++i) {
 		auto btn = btns[i];
-		if (isMouseOver && btn->rect.IsHit(cursorPt.x, cursorPt.y)) {
-			btn->state = Button::State_MouseOver;
-		}else {
-			btn->state = Button::State_Normal;
-		}
+        Button::State nextState = (isMouseOver && btn->rect.IsHit(cursorPt.x, cursorPt.y)) ? Button::State_MouseOver : Button::State_Normal;
+        if (btn->state != nextState) {
+            btn->stateChanged = true;
+        }
+    	btn->state = nextState;
 	}
 }
 
@@ -377,34 +337,49 @@ void draw(HWND hWnd)
 	}
 #endif
 
-	Rect updated;
+	bool updated = false;
+    Rect updatedRect;
+    updatedRect.Clear();
 
 	Image& dst = *images[ImgId_Dest];
-	FillRect(dst, 0, 0, dst.width, dst.height, RGB(150, 50, 50), updated);
-	UpdateRenderBlock(RBID_Background, updated);
-
+    if (frameCount <= 1) {
+	    FillRect(dst, 0, 0, dst.width, dst.height, RGB(150, 50, 50), updatedRect);
+	    updated = true;
+    }
+#if 0
 	int offset = +(now % 10000) / 10;
 	int xc = 200 +offset / 2;
 	int yc = 200 + offset;
 	Image& star = *images[ImgId_Star];
 	Draw(dst, xc, yc, star, 0, 0, 200, 200, updated);
 	UpdateRenderBlock(RBID_Star, updated);
+#endif
 
 	for (int i = 0; i<_countof(btns); ++i) {
 		auto btn = btns[i];
-		Button::ImageRef& imgRef = btn->images[btn->state];
-		Draw(dst, btn->rect.x, btn->rect.y, *imgRef.img, imgRef.pos.x, imgRef.pos.y, btn->rect.x, btn->rect.y, updated);
-		UpdateRenderBlock(RBID_Button0 + i, updated, btn->state);
+        if (frameCount <= 1 || btn->stateChanged) {
+		    Button::ImageRef& imgRef = btn->images[btn->state];
+            Rect updatedRect2;
+		    Draw(dst, btn->rect.x, btn->rect.y, *imgRef.img, imgRef.pos.x, imgRef.pos.y, btn->rect.x, btn->rect.y, updatedRect2);
+            updatedRect.Union(updatedRect2);
+	        updated = true;
+        }
+        btn->stateChanged = false;
 	}
 
 	++frameCount;
 
-	updated = GetBitBltRect();
-	RECT r = updated.GetRECT();
 #if 0
-	InvalidateRect(hWnd, NULL, FALSE);
+    InvalidateRect(hWnd, NULL, FALSE);
 #else
-	InvalidateRect(hWnd, &r, FALSE);
+    if (updated) {
+        RECT r;
+        r.left = updatedRect.x;
+        r.top = updatedRect.y;
+        r.right = updatedRect.x + updatedRect.w;
+        r.bottom = updatedRect.y + updatedRect.h;
+    	InvalidateRect(hWnd, &r, FALSE);
+    }
 #endif
 
 }
